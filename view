@@ -1,0 +1,126 @@
+view
+
+# main/views.py
+import json
+from django.shortcuts import render, redirect
+from django.db import IntegrityError
+from .models import UserList, DictPos, RoleD, Dictapplic, GroupD 
+from .models import UserRole 
+
+# ====================================================================
+# ФУНКЦІЯ 1: ГОЛОВНА СТОРІНКА (data_view.html) - Автозаповнення
+# ====================================================================
+
+def role_assignment_view(request):
+    """ Отримує дані користувачів та посад, формує JSON для JavaScript. """
+    
+    user_data = UserList.objects.select_related('id_pos').all()
+    
+    user_list_json = [
+        {
+            'id_user': user.id_user, 
+            'Prizvische': user.prizvische,
+            'Name': user.name,
+            'Father_Name': user.father_name,
+            'Position': user.id_pos.name_pos if user.id_pos else 'Не визначено',
+        }
+        for user in user_data
+    ]
+    
+    json_data = json.dumps(user_list_json, ensure_ascii=False)
+
+    context = {
+        'user_data_json': json_data
+    }
+    
+    return render(request, 'main/data_view.html', context)
+
+# ====================================================================
+# ФУНКЦІІ 2, 3: СТОРІНКА ЗВІТІВ (tabl_d.html) / СХЕМА (schem.html)
+# ====================================================================
+
+def page_two_view(request):
+    """
+    Рендеринг сторінки 'Таблиці' з усіма користувачами та їхніми ролями,
+    об'єднаними із додатками.
+    """
+    try:
+        # 1. Складний запит: UserList -> UserRole -> RoleD -> GroupD -> Dictapplic
+        all_users = UserList.objects.select_related('id_pos').prefetch_related(
+            'userrole_set__id_role__id_group__id_app' 
+        ).all()
+        
+        report_data = []
+        for user in all_users:
+            
+            pib = f"{user.prizvische} {user.name} {user.father_name}"
+            position_name = user.id_pos.name_pos if user.id_pos else 'Не визначено'
+            
+            roles_for_display = []
+            
+            # 2. Перебір призначених ролей
+            for user_role_entry in user.userrole_set.all():
+                role = user_role_entry.id_role 
+                group = role.id_group 
+                application = group.id_app 
+                
+                roles_for_display.append({
+                    'application': application.app_name, 
+                    'role_name': role.name 
+                })
+            
+            # 3. Формування кінцевих даних
+            report_data.append({
+                'id_user': user.id_user,
+                'pib': pib,
+                'position': position_name,
+                'roles_data': roles_for_display 
+            })
+            
+    except Exception as e:
+        # Якщо є інші помилки ORM, вони будуть виведені в консоль.
+        print(f"КРИТИЧНА ПОМИЛКА: {e}")
+        # Запасний варіант: повертаємо хоча б основні дані
+        simple_users = UserList.objects.select_related('id_pos').all()
+        report_data = []
+        for user in simple_users:
+            report_data.append({
+                'id_user': user.id_user,
+                'pib': f"{user.prizvische} {user.name} {user.father_name}",
+                'position': user.id_pos.name_pos if user.id_pos else 'Не визначено',
+                'roles_data': [{'application': 'ЗВ’ЯЗОК', 'role_name': 'АДАПТУЙТЕ ORM'}] 
+            })
+        
+    context = {
+        'report_data': report_data,
+    }
+    return render(request, 'main/tabl_d.html', context)
+
+
+def page_three_view(request):
+    """Рендеринг сторінки 'Схема' (schem.html)."""
+    return render(request, 'main/schem.html', {})
+
+# ====================================================================
+# ФУНКЦІЯ 4: СТВОРЕННЯ НОВОГО КОРИСТУВАЧА (you_user.html)
+# ====================================================================
+
+def page_four_view(request):
+    """ Обробляє форму створення користувача та рендерить you_user.html. """
+    
+    all_users_info = UserList.objects.all().values('id_user', 'prizvische', 'name')
+    users_for_select = list(all_users_info) 
+    
+    # ... (Ваша логіка обробки POST-запиту, якщо вона є) ...
+    
+    if request.method == 'POST':
+        # Якщо тут була логіка обробки форми, вона має бути вставлена тут
+        message = "Функціонал створення нового користувача не реалізовано!" # Заглушка
+        context = {'message': message, 'all_users': users_for_select}
+        return render(request, 'main/you_user.html', context)
+
+    # Обробка GET-запиту (просте відображення сторінки)
+    context = {
+        'all_users': users_for_select,
+    }
+    return render(request, 'main/you_user.html', context)
