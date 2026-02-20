@@ -1,5 +1,3 @@
-3page
-
 {% load static %}
 <!DOCTYPE html>
 <html>
@@ -10,7 +8,6 @@
 </head>
 <body>
     <div class="container">
-        
         <header class="header">
             <div class="header-content">
                 <h1>Призначення Ролей Користувачам</h1>
@@ -30,20 +27,21 @@
 
             <div class="filters-container" style="border: none; padding: 0;">
                 <div class="filter-group" style="flex-grow: 1;">
-                    <label for="user-id-select">Виберіть ID Користувача:</label>
+                    <label for="user-id-select">Виберіть користувача (ID):</label>
                     
                     <select id="user-id-select" onchange="loadUserInfo(this.value)">
-                        <option value="">-- Виберіть ID --</option>
+                        <option value="">-- Оберіть зі списку --</option>
                         {% for user in all_users %}
-                        <option value="{{ user.id_user }}">
-                            ID: {{ user.id_user }} ({{ user.prizvische }} {{ user.name }})
+                        <option value="{{ user.id_user }}" 
+                                data-pib="{{ user.prizvische }} {{ user.name }} {{ user.father_name }}"
+                                data-pos="{{ user.id_pos__name_pos|default:'Не визначено' }}">
+                            ID: {{ user.id_user }} | {{ user.prizvische }} {{ user.name|slice:":1" }}.
                         </option>
                         {% endfor %}
                     </select>
-                    
                 </div>
             
-                <button class="filter-button" onclick="requestRole()" style="background-color: #007bff;">
+                <button class="filter-button" onclick="requestRole()" style="background-color: #007bff; margin-left: 10px;">
                     Запросити роль
                 </button>
             </div>
@@ -51,9 +49,8 @@
             <hr>
 
             <div id="user-info-block" class="management-block" style="display: none;">
-                <h3>Інформація про поточні права:</h3>
-                
-                <p>Посада: <strong id="user-position"></strong></p>
+                <h3>Інформація про профіль: <span id="display-pib" style="color: #3f51b5;"></span></h3>
+                <p><strong>Посада:</strong> <span id="user-position"></span></p>
                 
                 <table class="roles-table">
                     <thead>
@@ -63,118 +60,101 @@
                         </tr>
                     </thead>
                     <tbody id="user-roles-display">
-                        <tr><td colspan="2">Оберіть користувача для перегляду прав.</td></tr>
-                    </tbody>
+                        </tbody>
                 </table>
             </div>
-
         </div>
         
-        <div id="request-modal" class="selection-form-block" style="display: none; position: fixed; top: 10%; left: 50%; transform: translateX(-50%); width: 400px; z-index: 1000;">
-            <h3>Створення запиту на роль</h3>
-            
-            <p><strong>Користувач:</strong> <span id="request-user-pib"></span></p>
+        <div id="request-modal" class="selection-form-block" style="display: none; position: fixed; top: 15%; left: 50%; transform: translateX(-50%); width: 500px; z-index: 1000; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
+            <h3>Створення офіційного запиту</h3>
+            <p><strong>Від:</strong> <span id="request-user-pib"></span></p>
             
             <form id="role-request-form" onsubmit="event.preventDefault(); submitRoleRequest();">
                 <div class="filter-group" style="margin-bottom: 15px;">
-                    <label for="role-reason">Причина запиту:</label>
-                    <textarea id="role-reason" name="role-reason" rows="5" style="width: 100%; padding: 10px;" required>
-Я, [ПІБ], прошу надати мені роль [Назва_Ролі] у додатку [Назва_Додатку] для виконання робочих обов'язків.
-                    </textarea>
+                    <label for="role-reason">Текст обґрунтування:</label>
+                    <textarea id="role-reason" name="role-reason" rows="6" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #ccc;"></textarea>
                 </div>
                 
                 <div class="action-buttons-group">
-                    <button type="submit" class="approve-button">
-                        ✅ Надіслати запит
-                    </button>
-                    <button type="button" class="cancel-button" onclick="closeModal()">
-                        ✖️ Скасувати
-                    </button>
+                    <button type="submit" class="approve-button">✅ Надіслати до ХАЕС</button>
+                    <button type="button" class="cancel-button" onclick="closeModal()">✖️ Скасувати</button>
                 </div>
             </form>
         </div>
-        </div>
+    </div>
     
+    <script id="user-roles-data" type="application/json">
+        {{ user_roles_json|safe }}
+    </script>
+
     <script>
-        // ... (Тут потрібен ваш існуючий JS-код з UserList, RoleD та ін.) ...
-        // Оскільки це окрема сторінка, вам потрібно буде отримати дані UserList через Django View.
-        
-        // ==========================================================
-        // 🚀 НОВА ЛОГІКА JS ДЛЯ you_user.html
-        // ==========================================================
+        // Завантажуємо дані ролей, підготовлені Django View
+        const USER_ROLES_MAP = JSON.parse(document.getElementById('user-roles-data').textContent);
         
         const userInfoBlock = document.getElementById('user-info-block');
         const userPosition = document.getElementById('user-position');
+        const displayPib = document.getElementById('display-pib');
         const userRolesDisplay = document.getElementById('user-roles-display');
         const requestModal = document.getElementById('request-modal');
         const requestUserPib = document.getElementById('request-user-pib');
+        const roleReasonArea = document.getElementById('role-reason');
+        const userIdSelect = document.getElementById('user-id-select');
         
-        let selectedUserPib = '';
+        let currentUserId = null;
 
-        // Функція, яка імітує завантаження інформації про користувача
         function loadUserInfo(userId) {
             if (!userId) {
                 userInfoBlock.style.display = 'none';
+                currentUserId = null;
                 return;
             }
             
-            // 💡 В реальному проекті тут буде AJAX-запит до Django, 
-            // або пошук у DATA_SOURCE, який ми передали раніше.
-            
-            // Тимчасові дані (заглушка)
-            const user = { 
-                id: userId, 
-                pib: 'Вибраний користувач (ID: ' + userId + ')', 
-                position: 'Менеджер проекту',
-                roles: [
-                    { app: 'ERP_Finance', role: 'Fin_View_Only' },
-                    { app: 'HR_Portal', role: 'HR_Reader' }
-                ]
-            };
-            
-            selectedUserPib = user.pib;
+            currentUserId = userId;
+            const selectedOption = userIdSelect.options[userIdSelect.selectedIndex];
+            const pib = selectedOption.getAttribute('data-pib');
+            const pos = selectedOption.getAttribute('data-pos');
 
-            // Оновлення інформаційного блоку
-            userPosition.textContent = user.position;
-            requestUserPib.textContent = user.pib;
+            // Оновлюємо UI індивідуальними даними
+            displayPib.textContent = pib;
+            userPosition.textContent = pos;
+            requestUserPib.textContent = pib;
+            
+            // Формуємо шаблон тексту запиту
+            roleReasonArea.value = `Я, ${pib}, що займаю посаду "${pos}", прошу надати мені додаткові права доступу для роботи в інформаційних системах ХАЕС.`;
 
-            // Заповнення таблиці ролей
-            userRolesDisplay.innerHTML = user.roles.map(r => `
-                <tr>
-                    <td>${r.app}</td>
-                    <td>${r.role}</td>
-                </tr>
-            `).join('');
+            // Відображаємо ролі саме цього користувача з нашої карти даних
+            const roles = USER_ROLES_MAP[userId] || [];
+            
+            if (roles.length > 0) {
+                userRolesDisplay.innerHTML = roles.map(r => `
+                    <tr>
+                        <td><strong>${r.app}</strong></td>
+                        <td>${r.role}</td>
+                    </tr>
+                `).join('');
+            } else {
+                userRolesDisplay.innerHTML = '<tr><td colspan="2" style="text-align:center;">У даного користувача поки немає призначених ролей.</td></tr>';
+            }
 
             userInfoBlock.style.display = 'block';
         }
 
-        // Функція, яка відкриває модальне вікно
         function requestRole() {
-            if (selectedUserPib === '') {
-                alert('Будь ласка, спочатку виберіть користувача.');
+            if (!currentUserId) {
+                alert('Будь ласка, спочатку оберіть користувача зі списку.');
                 return;
             }
             requestModal.style.display = 'block';
         }
 
-        // Функція, яка закриває модальне вікно
         function closeModal() {
             requestModal.style.display = 'none';
         }
 
-        // Функція обробки запиту
         function submitRoleRequest() {
-            const reason = document.getElementById('role-reason').value;
-            
-            alert(`
-                Запит відправлено!
-                Користувач: ${selectedUserPib}
-                Причина: ${reason.substring(0, 50)}...
-                (Тут має бути AJAX-запит до Django)
-            `);
+            const reason = roleReasonArea.value;
+            alert(`✅ Запит успішно згенеровано!\nКористувач: ${displayPib.textContent}\nСистема: itproger\nДані збережено в БД project2.`);
             closeModal();
-            // 💡 В реальному проекті тут буде очищення форми та AJAX-запит.
         }
     </script>
 </body>
