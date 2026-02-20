@@ -1,11 +1,8 @@
-view
-
 # main/views.py
 import json
 from django.shortcuts import render, redirect
 from django.db import IntegrityError
-from .models import UserList, DictPos, RoleD, Dictapplic, GroupD 
-from .models import UserRole 
+from .models import UserList, DictPos, RoleD, Dictapplic, GroupD, UserRole 
 
 # ====================================================================
 # ФУНКЦІЯ 1: ГОЛОВНА СТОРІНКА (data_view.html) - Автозаповнення
@@ -40,87 +37,89 @@ def role_assignment_view(request):
 # ====================================================================
 
 def page_two_view(request):
-    """
-    Рендеринг сторінки 'Таблиці' з усіма користувачами та їхніми ролями,
-    об'єднаними із додатками.
-    """
-    try:
-        # 1. Складний запит: UserList -> UserRole -> RoleD -> GroupD -> Dictapplic
-        all_users = UserList.objects.select_related('id_pos').prefetch_related(
-            'userrole_set__id_role__id_group__id_app' 
-        ).all()
+    """ Реалізує фільтрацію користувачів за додатками та назвою ролі. """
+    selected_apps = request.GET.getlist('app_filter') 
+    role_query = request.GET.get('role_filter', '').strip() 
+
+    # Використовуємо select_related та prefetch_related для оптимізації SQL-запитів
+    # 
+    users_queryset = UserList.objects.select_related('id_pos').prefetch_related(
+        'userrole_set__id_role__id_group__id_app'
+    ).all()
+
+    if selected_apps:
+        users_queryset = users_queryset.filter(
+            userrole_set__id_role__id_group__id_app__app_name__in=selected_apps
+        ).distinct()
+
+    if role_query:
+        users_queryset = users_queryset.filter(
+            userrole_set__id_role__name__icontains=role_query
+        ).distinct()
+
+    report_data = []
+    for user in users_queryset:
+        pib = f"{user.prizvische} {user.name} {user.father_name}"
+        position_name = user.id_pos.name_pos if user.id_pos else 'Не визначено'
         
-        report_data = []
-        for user in all_users:
+        roles_for_display = []
+        for user_role_entry in user.userrole_set.all():
+            role = user_role_entry.id_role
+            app = role.id_group.id_app
             
-            pib = f"{user.prizvische} {user.name} {user.father_name}"
-            position_name = user.id_pos.name_pos if user.id_pos else 'Не визначено'
+            matches_app = not selected_apps or app.app_name in selected_apps
+            matches_role = not role_query or role_query.lower() in role.name.lower()
             
-            roles_for_display = []
-            
-            # 2. Перебір призначених ролей
-            for user_role_entry in user.userrole_set.all():
-                role = user_role_entry.id_role 
-                group = role.id_group 
-                application = group.id_app 
-                
+            if matches_app and matches_role:
                 roles_for_display.append({
-                    'application': application.app_name, 
-                    'role_name': role.name 
+                    'application': app.app_name,
+                    'role_name': role.name
                 })
-            
-            # 3. Формування кінцевих даних
+        
+        if roles_for_display:
             report_data.append({
                 'id_user': user.id_user,
                 'pib': pib,
                 'position': position_name,
-                'roles_data': roles_for_display 
+                'roles_data': roles_for_display
             })
-            
-    except Exception as e:
-        # Якщо є інші помилки ORM, вони будуть виведені в консоль.
-        print(f"КРИТИЧНА ПОМИЛКА: {e}")
-        # Запасний варіант: повертаємо хоча б основні дані
-        simple_users = UserList.objects.select_related('id_pos').all()
-        report_data = []
-        for user in simple_users:
-            report_data.append({
-                'id_user': user.id_user,
-                'pib': f"{user.prizvische} {user.name} {user.father_name}",
-                'position': user.id_pos.name_pos if user.id_pos else 'Не визначено',
-                'roles_data': [{'application': 'ЗВ’ЯЗОК', 'role_name': 'АДАПТУЙТЕ ORM'}] 
-            })
-        
-    context = {
-        'report_data': report_data,
-    }
-    return render(request, 'main/tabl_d.html', context)
+
+    return render(request, 'main/tabl_d.html', {'report_data': report_data})
 
 
 def page_three_view(request):
-    """Рендеринг сторінки 'Схема' (schem.html)."""
+    """Рендеринг сторінки 'Схема'."""
     return render(request, 'main/schem.html', {})
 
 # ====================================================================
-# ФУНКЦІЯ 4: СТВОРЕННЯ НОВОГО КОРИСТУВАЧА (you_user.html)
+# ФУНКЦІЯ 4: ПРОФІЛЬ ТА ЗАПИТ РОЛІ (you_user.html)
 # ====================================================================
 
 def page_four_view(request):
-    """ Обробляє форму створення користувача та рендерить you_user.html. """
+    """ Формує дані для індивідуальних профілів користувачів ХАЕС. """
     
-    all_users_info = UserList.objects.all().values('id_user', 'prizvische', 'name')
-    users_for_select = list(all_users_info) 
+    # Отримуємо всіх користувачів для випадаючого списку
+    all_users = UserList.objects.select_related('id_pos').all().values(
+        'id_user', 'prizvische', 'name', 'father_name', 'id_pos__name_pos'
+    )
     
-    # ... (Ваша логіка обробки POST-запиту, якщо вона є) ...
+    # Створюємо словник ролей для кожного користувача для JS
+    # 
+    user_roles_map = {}
+    all_assignments = UserRole.objects.select_related('id_role__id_group__id_app', 'id_user').all()
     
-    if request.method == 'POST':
-        # Якщо тут була логіка обробки форми, вона має бути вставлена тут
-        message = "Функціонал створення нового користувача не реалізовано!" # Заглушка
-        context = {'message': message, 'all_users': users_for_select}
-        return render(request, 'main/you_user.html', context)
+    for assignment in all_assignments:
+        u_id = str(assignment.id_user.id_user)
+        if u_id not in user_roles_map:
+            user_roles_map[u_id] = []
+        
+        user_roles_map[u_id].append({
+            'app': assignment.id_role.id_group.id_app.app_name,
+            'role': assignment.id_role.name
+        })
 
-    # Обробка GET-запиту (просте відображення сторінки)
     context = {
-        'all_users': users_for_select,
+        'all_users': all_users,
+        'user_roles_json': json.dumps(user_roles_map, ensure_ascii=False)
     }
     return render(request, 'main/you_user.html', context)
